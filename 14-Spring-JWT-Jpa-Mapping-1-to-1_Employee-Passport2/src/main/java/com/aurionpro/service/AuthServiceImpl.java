@@ -1,0 +1,91 @@
+package com.aurionpro.service;
+
+
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import com.aurionpro.dto.LoginDto;
+import com.aurionpro.dto.RegistrationDto;
+import com.aurionpro.dto.UserResponseDto;
+import com.aurionpro.entity.Role;
+import com.aurionpro.entity.User;
+import com.aurionpro.exception.UserApiException;
+import com.aurionpro.repository.RoleRepo;
+import com.aurionpro.repository.UserRepo;
+import com.aurionpro.security.JwtTokenProvider;
+
+import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
+
+@Service
+@AllArgsConstructor
+@RequiredArgsConstructor
+public class AuthServiceImpl implements AuthService {
+
+	@Autowired
+	private AuthenticationManager authenticationManager;
+	@Autowired
+	private UserRepo userRepo;
+	@Autowired
+	private RoleRepo roleRepo;
+	@Autowired
+	private PasswordEncoder passwordEncoder;
+	@Autowired
+	private JwtTokenProvider tokenProvider;
+	
+	
+	
+	
+	
+	
+
+	@Override
+	public UserResponseDto register(RegistrationDto registerDto) {
+		if (userRepo.existsByUsername(registerDto.getUsername()))
+			throw new UserApiException(HttpStatus.BAD_REQUEST, "User already exists");
+
+		User user = new User();
+		user.setUsername(registerDto.getUsername());
+		user.setPassword(passwordEncoder.encode(registerDto.getPassword()));
+
+	//	List<Role> roles = new ArrayList<Role>();
+		
+//		registerDto.getRoles().stream().map((role)-> roles.add(roleRepo.findByRolename(role).get()));
+
+		Role userRole = roleRepo.findByRolename(registerDto.getRole()).
+				orElseThrow(()-> new UserApiException(HttpStatus.BAD_REQUEST, "Role does not exists"));
+		userRole.getUsers().add(user);
+		user.setRole(userRole);
+
+		user = userRepo.save(user);
+		
+		UserResponseDto dto=new UserResponseDto();
+		dto.setUserId(user.getUserId());
+		dto.setUsername(user.getUsername());
+		
+		return dto;
+	}
+
+	@Override
+	public String login(LoginDto loginDto) {
+		try {
+			Authentication authentication = authenticationManager.authenticate(
+					new UsernamePasswordAuthenticationToken(loginDto.getUsername(), loginDto.getPassword()));
+			SecurityContextHolder.getContext().setAuthentication(authentication);
+			String token = tokenProvider.generateToken(authentication);
+
+			return token;
+		} catch (BadCredentialsException e) {
+			throw new UserApiException(HttpStatus.NOT_FOUND, "Username or Password is incorrect");
+		}
+	}
+
+}

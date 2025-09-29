@@ -1,0 +1,18 @@
+package com.aurionpro.dto;
+
+import java.math.BigDecimal;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class AccountSummary {
+	private Long accountId;
+	private String accountNumber;
+	private String accountType;
+	private BigDecimal balance;
+	private Long customerId; // add this field
+	private Boolean isAccountActive
+}

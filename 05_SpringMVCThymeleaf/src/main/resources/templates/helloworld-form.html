@@ -1,0 +1,18 @@
+<!DOCTYPE HTML>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+	
+	<link rel="stylesheet" href="css/style.css">
+	
+</head>	
+<body>
+	
+	<form th:action="@{/processForm}" method="get">
+		<label for="myText">Enter your name</label> 
+		<input type="text" id="myText" name="name"/>
+		<input type="submit"/>	
+	</form>
+</body>
+
+
+</html>

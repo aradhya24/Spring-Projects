@@ -1,0 +1,84 @@
+package com.aurionpro.controller;
+
+import java.util.List;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.aurionpro.dto.AccountCreateRequest;
+import com.aurionpro.dto.AccountResponse;
+import com.aurionpro.dto.CustomerRequest;
+import com.aurionpro.dto.CustomerResponse;
+import com.aurionpro.service.CustomerService;
+
+import lombok.RequiredArgsConstructor;
+
+@RestController
+@RequestMapping("/api/customers")
+@RequiredArgsConstructor
+public class CustomerController {
+
+    private final CustomerService customerService;
+
+    // Only SUPER_ADMIN and ADMIN can create customers
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN')")
+    @PostMapping
+    public ResponseEntity<CustomerResponse> createCustomer(@RequestBody CustomerRequest request) {
+        return new ResponseEntity<>(customerService.createCustomer(request), HttpStatus.CREATED);
+    }
+
+    // SUPER_ADMIN and ADMIN can update customers
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN')")
+    @PutMapping("/{id}")
+    public ResponseEntity<CustomerResponse> updateCustomer(@PathVariable Long id,
+            @RequestBody CustomerRequest request) {
+        return ResponseEntity.ok(customerService.updateCustomer(id, request));
+    }
+
+    // Only SUPER_ADMIN can delete customers
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteCustomer(@PathVariable Long id) {
+        customerService.deleteCustomer(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    // SUPER_ADMIN and ADMIN can fetch any customer
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN')")
+    @GetMapping("/{id}")
+    public ResponseEntity<CustomerResponse> getCustomerById(@PathVariable Long id) {
+        return ResponseEntity.ok(customerService.getCustomerById(id));
+    }
+
+    // SUPER_ADMIN can see all customers
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @GetMapping
+    public ResponseEntity<List<CustomerResponse>> getAllCustomers() {
+        return ResponseEntity.ok(customerService.getAllCustomers());
+    }
+
+    // Customers can create their own account
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN','CUSTOMER')")
+    @PostMapping("/{customerId}/accounts")
+    public ResponseEntity<AccountResponse> createAccount(@PathVariable Long customerId,
+            @RequestBody AccountCreateRequest request) {
+        request.setCustomerId(customerId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(customerService.createAccount(request));
+    }
+
+    // Customers can fetch only their accounts, admins can fetch their customers
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN','CUSTOMER')")
+    @GetMapping("/{customerId}/accounts")
+    public ResponseEntity<List<AccountResponse>> getAccounts(@PathVariable Long customerId) {
+        return ResponseEntity.ok(customerService.getAccountsByCustomerId(customerId));
+    }
+}

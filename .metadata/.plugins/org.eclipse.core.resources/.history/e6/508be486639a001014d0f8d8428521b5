@@ -1,0 +1,95 @@
+package com.aurionpro.service;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import com.aurionpro.dto.AddressRequest;
+import com.aurionpro.dto.LoginDto;
+import com.aurionpro.dto.RegistrationDto;
+import com.aurionpro.dto.UserResponse;
+import com.aurionpro.entity.Address;
+import com.aurionpro.entity.Customer;
+import com.aurionpro.entity.Role;
+import com.aurionpro.entity.User;
+import com.aurionpro.exception.UserApiException;
+import com.aurionpro.repository.RoleRepo;
+import com.aurionpro.repository.UserRepo;
+import com.aurionpro.security.JwtTokenProvider;
+
+import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
+
+@Service
+@AllArgsConstructor
+@RequiredArgsConstructor
+public class AuthServiceImpl implements AuthService {
+
+	@Autowired
+	private AuthenticationManager authenticationManager;
+	@Autowired
+	private UserRepo userRepo;
+	@Autowired
+	private RoleRepo roleRepo;
+	@Autowired
+	private PasswordEncoder passwordEncoder;
+	@Autowired
+	private JwtTokenProvider tokenProvider;
+
+	private final EmailService emailService;
+
+	@Override
+	public UserResponse register(RegistrationDto registerDto) {
+		if (userRepo.existsByUsername(registerDto.getUsername()))
+			throw new UserApiException(HttpStatus.BAD_REQUEST, "User already exists");
+
+		User user = new User();
+		user.setUsername(registerDto.getUsername());
+		user.setPassword(passwordEncoder.encode(registerDto.getPassword()));
+
+		Role userRole = roleRepo.findByRolename("ROLE_CUSTOMER")
+				.orElseThrow(() -> new UserApiException(HttpStatus.BAD_REQUEST, "Role does not exists"));
+
+		user.setRole(userRole);
+		user.setIsUserActive(true); // default active
+		userRepo.save(user);
+
+		UserResponse dto = new UserResponse();
+		dto.setUserId(user.getUserId());
+		dto.setUsername(user.getUsername());
+		dto.setRole(user.getRole().getRolename());
+		return dto;
+	}
+
+	@Override
+	public String login(LoginDto loginDto) {
+	    try {
+	        Authentication authentication = authenticationManager.authenticate(
+	                new UsernamePasswordAuthenticationToken(loginDto.getUsername(), loginDto.getPassword()));
+	        SecurityContextHolder.getContext().setAuthentication(authentication);
+	        String token = tokenProvider.generateToken(authentication);
+
+	        // Send email if user has ROLE_CUSTOMER
+	        User user = userRepo.findByUsername(loginDto.getUsername())
+	                            .orElseThrow(() -> new RuntimeException("User not found"));
+	        if ("ROLE_CUSTOMER".equals(user.getRole().getRolename()) && user.getIsUserActive()) {
+	            emailService.sendEmail(user.getUsername(), 
+	                                   "Login Alert", 
+	                                   "Dear Customer,\n\nYou have successfully logged in.\n\nThank you!");
+	        }
+
+	        return token;
+	    } catch (BadCredentialsException e) {
+	        throw new UserApiException(HttpStatus.NOT_FOUND, "Username or Password is incorrect");
+	    }
+	}
+
+
+}

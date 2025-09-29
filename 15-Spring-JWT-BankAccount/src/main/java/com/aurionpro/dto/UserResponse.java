@@ -1,0 +1,21 @@
+package com.aurionpro.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class UserResponse {
+	public UserResponse(int userId2, String username2, String rolename) {
+		this.userId = userId2;
+		this.username = username2;
+		this.role = rolename;
+	}
+
+	private int userId;
+	private String username;
+	private String role; // e.g., "CUSTOMER" or "ADMIN"
+	private Boolean isUserActive;
+}

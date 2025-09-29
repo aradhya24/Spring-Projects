@@ -1,0 +1,22 @@
+package com.aurionpro.dto;
+
+import java.time.LocalDate;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class CustomerRequest {
+    private String firstName;
+    private String lastName;
+    private String emailid;
+    private String contactno;
+    private LocalDate dob;
+    private AddressRequest address;
+
+    // User details for login
+    private UserRequest user;
+}

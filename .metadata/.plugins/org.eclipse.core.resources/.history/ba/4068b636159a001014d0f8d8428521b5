@@ -1,0 +1,138 @@
+package com.aurionpro.service;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.modelmapper.ModelMapper;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import com.aurionpro.dto.TransactionCreateRequest;
+import com.aurionpro.dto.TransactionResponse;
+import com.aurionpro.entity.Account;
+import com.aurionpro.entity.Customer;
+import com.aurionpro.entity.Transaction;
+import com.aurionpro.repository.AccountRepo;
+import com.aurionpro.repository.CustomerRepo;
+import com.aurionpro.repository.TransactionRepo;
+
+import lombok.RequiredArgsConstructor;
+
+@Service
+@RequiredArgsConstructor
+public class TransactionServiceImpl implements TransactionService {
+
+    private final TransactionRepo transactionRepo;
+    private final CustomerRepo customerRepo;
+    private final AccountRepo accountRepo;
+    private final ModelMapper modelMapper;
+
+    @Override
+    public TransactionResponse createTransaction(TransactionCreateRequest request) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+        Customer customer = customerRepo.findById(request.getCustomerId())
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        // 🚨 Ownership check
+        if (!isAdmin) {
+            Customer currentCustomer = customerRepo.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            if (!currentCustomer.getId().equals(customer.getId())) {
+                throw new AccessDeniedException("You cannot create a transaction for another customer");
+            }
+        }
+
+        Account account = accountRepo.findById(request.getAccountId())
+                .orElseThrow(() -> new RuntimeException("Account not found"));
+
+        // also ensure account belongs to the same customer
+        if (!account.getCustomer().getId().equals(customer.getId())) {
+            throw new AccessDeniedException("This account does not belong to the customer");
+        }
+
+        Transaction transaction = Transaction.builder()
+                .account(account)
+                .amount(request.getAmount())
+                .transType(request.getTransType())
+                .remarks(request.getRemarks())
+                .date(LocalDateTime.now())
+                .build();
+
+        account.getTransactions().add(transaction);
+        customer.getTransactions().add(transaction);
+
+        Transaction saved = transactionRepo.save(transaction);
+
+        TransactionResponse response = modelMapper.map(saved, TransactionResponse.class);
+        response.setCustomerId(customer.getId());
+        response.setAccountId(account.getAccountId());
+        return response;
+    }
+
+
+    @Override
+    public List<TransactionResponse> getTransactionsByAccountId(Long accountId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+        Account account = accountRepo.findById(accountId)
+                .orElseThrow(() -> new RuntimeException("Account not found"));
+
+        if (!isAdmin) {
+            Customer currentCustomer = customerRepo.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            if (!account.getCustomer().getId().equals(currentCustomer.getId())) {
+                throw new AccessDeniedException("You cannot view transactions of another customer’s account");
+            }
+        }
+
+        return account.getTransactions().stream()
+                .map(t -> {
+                    TransactionResponse dto = modelMapper.map(t, TransactionResponse.class);
+                    dto.setCustomerId(account.getCustomer().getId());
+                    dto.setAccountId(accountId);
+                    return dto;
+                }).collect(Collectors.toList());
+    }
+
+
+    @Override
+    public List<TransactionResponse> getTransactionsByCustomerId(Long customerId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+        if (!isAdmin) {
+            Customer currentCustomer = customerRepo.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            if (!currentCustomer.getId().equals(customerId)) {
+                throw new AccessDeniedException("You cannot view transactions of another customer");
+            }
+        }
+
+        Customer customer = customerRepo.findById(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        return customer.getTransactions().stream()
+                .map(t -> {
+                    TransactionResponse dto = modelMapper.map(t, TransactionResponse.class);
+                    dto.setCustomerId(customerId);
+                    dto.setAccountId(t.getAccount().getAccountId());
+                    return dto;
+                }).collect(Collectors.toList());
+    }
+
+}

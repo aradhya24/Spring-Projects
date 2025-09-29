@@ -1,0 +1,60 @@
+package com.aurionpro.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
+import com.aurionpro.dto.JwtAuthResponse;
+import com.aurionpro.dto.LoginDto;
+import com.aurionpro.dto.RegistrationDto;
+import com.aurionpro.dto.UserResponseDto;
+import com.aurionpro.service.AuthService;
+
+@RestController
+@RequestMapping("/api")
+public class LoginController {
+
+    @Autowired
+    private AuthService authService;
+
+    // ✅ Register endpoint (requires token)
+    @PostMapping("/register")
+    @PreAuthorize("hasAnyRole('ADMIN','SUPERADMIN')")
+    public ResponseEntity<UserResponseDto> register(@RequestBody RegistrationDto registerDto) {
+
+        // Only SUPERADMIN can create ADMIN
+        if ("ADMIN".equalsIgnoreCase(registerDto.getRole())) {
+            if (!hasRole("SUPERADMIN")) {
+                throw new RuntimeException("Only SUPERADMIN can register an ADMIN user");
+            }
+        }
+
+        // Only ADMIN or SUPERADMIN can create CUSTOMER
+        if ("CUSTOMER".equalsIgnoreCase(registerDto.getRole())) {
+            if (!(hasRole("ADMIN") || hasRole("SUPERADMIN"))) {
+                throw new RuntimeException("Only ADMIN or SUPERADMIN can register a CUSTOMER");
+            }
+        }
+
+        return ResponseEntity.ok(authService.register(registerDto));
+    }
+
+    // ✅ Login endpoint (public)
+    @PostMapping("/login")
+    public ResponseEntity<JwtAuthResponse> login(@RequestBody LoginDto loginDto) {
+        String token = authService.login(loginDto);
+        JwtAuthResponse jwtAuthResponse = new JwtAuthResponse();
+        jwtAuthResponse.setAccessToken(token);
+        return ResponseEntity.ok(jwtAuthResponse);
+    }
+
+    private boolean hasRole(String role) {
+        return org.springframework.security.core.context.SecurityContextHolder
+                .getContext()
+                .getAuthentication()
+                .getAuthorities()
+                .stream()
+                .anyMatch(granted -> granted.getAuthority().equals("ROLE_" + role));
+    }
+}

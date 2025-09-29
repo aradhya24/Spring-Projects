@@ -1,0 +1,12 @@
+#myh3{
+	font-size: 3em;
+	font-family: Verdana, Geneva, Tahoma, sans-serif;
+    text-align: center;
+	color: darkcyan;
+	background-color: cornsilk;
+	padding: auto;
+}
+
+.error{
+	color: red;
+}

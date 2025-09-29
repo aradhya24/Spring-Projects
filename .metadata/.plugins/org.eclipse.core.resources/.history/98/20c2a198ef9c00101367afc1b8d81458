@@ -1,0 +1,246 @@
+package com.aurionpro.service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.modelmapper.ModelMapper;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import com.aurionpro.dto.AccountCreateRequest;
+import com.aurionpro.dto.AccountResponse;
+import com.aurionpro.dto.CustomerRequest;
+import com.aurionpro.dto.CustomerResponse;
+import com.aurionpro.repository.AccountRepo;
+import com.aurionpro.repository.CustomerRepo;
+import com.aurionpro.repository.UserRepo;
+import com.aurionpro.service.CustomerService;
+import com.aurionpro.service.EmailService;
+import com.aurionpro.entity.Account;
+import com.aurionpro.entity.Address;
+import com.aurionpro.entity.Customer;
+import com.aurionpro.entity.User;
+
+import lombok.RequiredArgsConstructor;
+
+@Service
+@RequiredArgsConstructor
+public class CustomerServiceImpl implements CustomerService {
+
+    private final CustomerRepo customerRepository;
+    private final AccountRepo accountRepository;
+    private final UserRepo userRepository;
+    private final EmailService emailService;
+    private final ModelMapper modelMapper;
+
+    // ---------------- Customer CRUD ----------------
+    @Override
+    public CustomerResponse createCustomer(CustomerRequest request) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+
+        Customer existingCustomer = customerRepository.findByUserUsername(username)
+                .orElse(null);
+        if (existingCustomer != null) throw new RuntimeException("Customer details already exist");
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        Customer customer = modelMapper.map(request, Customer.class);
+        customer.setUser(user);
+        customer.setIsCustomerActive(true);
+
+        Customer saved = customerRepository.save(customer);
+
+        // Send registration email
+        emailService.sendCustomerRegistrationEmail(saved.getEmailid(), saved.getId());
+
+        return modelMapper.map(saved, CustomerResponse.class);
+    }
+
+
+
+	    @Override
+	    public CustomerResponse updateCustomer(CustomerRequest request) {
+	        // 1️⃣ Get logged-in user
+	        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+	        String username = auth.getName();
+
+	        // 2️⃣ Fetch the customer linked to this user
+	        Customer existingCustomer = customerRepository.findByUserUsername(username)
+	                .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+	        // 3️⃣ Update main fields if present
+	        if (request.getFirstName() != null) existingCustomer.setFirstName(request.getFirstName());
+	        if (request.getLastName() != null) existingCustomer.setLastName(request.getLastName());
+	        if (request.getEmailid() != null) existingCustomer.setEmailid(request.getEmailid());
+	        if (request.getContactno() != null) existingCustomer.setContactno(request.getContactno());
+	        if (request.getDob() != null) existingCustomer.setDob(request.getDob());
+	        if (request.getIsCustomerActive() != null) existingCustomer.setIsCustomerActive(request.getIsCustomerActive());
+
+	        // 4️⃣ Handle nested Address updates
+	        if (request.getAddress() != null) {
+	            Address existingAddress = existingCustomer.getAddress();
+
+	            if (existingAddress == null) {
+	                existingAddress = new Address();
+	                existingCustomer.setAddress(existingAddress);
+	            }
+
+	            if (request.getAddress().getCity() != null) existingAddress.setCity(request.getAddress().getCity());
+	            if (request.getAddress().getState() != null) existingAddress.setState(request.getAddress().getState());
+	            if (request.getAddress().getPincode() != null) existingAddress.setPincode(request.getAddress().getPincode());
+	        }
+
+	        // 5️⃣ Save updated customer
+	        Customer updatedCustomer = customerRepository.save(existingCustomer);
+
+	        // 6️⃣ Map to DTO and return
+	        return modelMapper.map(updatedCustomer, CustomerResponse.class);
+	    }
+
+
+
+	    @Override
+	    public String inactivateCustomer(Long id) {
+	        Customer customer = customerRepository.findById(id)
+	                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+	        customer.setIsCustomerActive(false);
+	        customer.getAccounts().forEach(acc -> acc.setIsAccountActive(false));
+	        customerRepository.save(customer);
+
+	        emailService.sendEmail(customer.getEmailid(), "Account Inactivated", 
+	            "Dear Customer, your profile and accounts have been inactivated.");
+
+	        return "Successfully Inactivated Customer with ID:" + id;
+	    }
+
+	    @Override
+	    public String activateCustomer(Long id) {
+	        Customer customer = customerRepository.findById(id)
+	                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+	        customer.setIsCustomerActive(true);
+	        // Optionally reactivate accounts
+	        // customer.getAccounts().forEach(acc -> acc.setIsAccountActive(true));
+	        customerRepository.save(customer);
+
+	        emailService.sendEmail(customer.getEmailid(), "Account Activated", 
+	            "Dear Customer, your profile has been activated.");
+
+	        return "Successfully Activated Customer with ID:" + id;
+	    }
+
+    @Override
+    public CustomerResponse getCustomerById(Long id) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+
+        boolean isAdmin = auth.getAuthorities().stream()
+                .map(a -> a.getAuthority())
+                .anyMatch(role -> role.equals("ROLE_ADMIN") || role.equals("ROLE_SUPER_ADMIN"));
+
+
+        Customer customer = customerRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        if (!isAdmin) {
+            // Logged-in customer
+            Customer currentCustomer = customerRepository.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            // Prevent customer from accessing others’ data
+            if (!currentCustomer.getId().equals(id)) {
+                throw new AccessDeniedException("You cannot access another customer's details");
+            }
+
+            // Prevent inactive customers from viewing their own data
+            if (Boolean.FALSE.equals(currentCustomer.getIsCustomerActive())) {
+                throw new AccessDeniedException("Your account is inactive. Please contact admin.");
+            }
+        }
+
+        return modelMapper.map(customer, CustomerResponse.class);
+    }
+
+
+
+    @Override
+    public List<CustomerResponse> getAllCustomers() {
+        return customerRepository.findAll()
+                .stream()
+                .map(c -> modelMapper.map(c, CustomerResponse.class))
+                .collect(Collectors.toList());
+    }
+
+    // ---------------- Account Methods ----------------
+    @Override
+    public AccountResponse createAccount(AccountCreateRequest request) {
+        Customer customer = customerRepository.findById(request.getCustomerId())
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        Account account = Account.builder()
+                .accountNumber(request.getAccountNumber())
+                .accountType(request.getAccountType())
+                .balance(request.getBalance())
+                .isAccountActive(request.getIsAccountActive())
+                .build();
+
+        // Associate account with customer
+        customer.getAccounts().add(account);
+        account.setCustomer(customer);
+        accountRepository.save(account);
+
+        // Map to response
+        return AccountResponse.builder()
+                .customerId(customer.getId())
+                .accountId(account.getAccountId())
+                .accountNumber(account.getAccountNumber())
+                .accountType(account.getAccountType())
+                .balance(account.getBalance())
+                .isAccountActive(request.getIsAccountActive())
+                .transactions(List.of()) // empty list initially
+                .build();
+    }
+
+    @Override
+    public List<AccountResponse> getAccountsByCustomerId(Long customerId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+
+        boolean isAdmin = auth.getAuthorities().stream()
+                .map(a -> a.getAuthority())
+                .anyMatch(role -> role.equals("ROLE_ADMIN") || role.equals("ROLE_SUPER_ADMIN"));
+
+
+        if (!isAdmin) {
+            // Logged-in customer
+            Customer currentCustomer = customerRepository.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            if (!currentCustomer.getId().equals(customerId)) {
+                throw new AccessDeniedException("You cannot access another customer's accounts");
+            }
+            
+            if(!currentCustomer.getIsCustomerActive()) {
+            	throw new AccessDeniedException("You cannot access INACIVE customer's accounts ");
+            }
+        }
+
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        return customer.getAccounts().stream()
+                .map(a -> {
+                    AccountResponse dto = modelMapper.map(a, AccountResponse.class);
+                    dto.setCustomerId(customerId);
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+}
+

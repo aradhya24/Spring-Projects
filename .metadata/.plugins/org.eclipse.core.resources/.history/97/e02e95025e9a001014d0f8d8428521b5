@@ -1,0 +1,169 @@
+package com.aurionpro.service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.modelmapper.ModelMapper;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import com.aurionpro.dto.AccountCreateRequest;
+import com.aurionpro.dto.AccountSummary;
+import com.aurionpro.entity.Account;
+import com.aurionpro.entity.Customer;
+import com.aurionpro.repository.AccountRepo;
+import com.aurionpro.repository.CustomerRepo;
+
+import lombok.RequiredArgsConstructor;
+
+@Service
+@RequiredArgsConstructor
+public class AccountServiceImpl implements AccountService {
+
+    private final CustomerRepo customerRepository;
+    private final AccountRepo accountRepository;
+    private final ModelMapper modelMapper;
+
+    @Override
+    public AccountSummary createAccount(AccountCreateRequest request) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+        Customer customer = customerRepository.findById(request.getCustomerId())
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        if (!isAdmin) {
+            Customer currentCustomer = customerRepository.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            if (!currentCustomer.getId().equals(customer.getId())) {
+                throw new AccessDeniedException("You cannot create accounts for another customer");
+            }
+        }
+
+        Account account = Account.builder()
+                .accountNumber(request.getAccountNumber())
+                .accountType(request.getAccountType())
+                .balance(request.getBalance())
+                .customer(customer)
+                .isAccountActive(request.getIsAccountActive())
+                .build();
+
+        Account saved = accountRepository.saveAndFlush(account);
+
+        AccountSummary dto = modelMapper.map(saved, AccountSummary.class);
+        dto.setCustomerId(customer.getId());
+        return dto;
+    }
+
+
+    @Override
+    public List<AccountSummary> getAccountsByCustomerId(Long customerId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+        if (!isAdmin) {
+            Customer currentCustomer = customerRepository.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            if (!currentCustomer.getId().equals(customerId)) {
+                throw new AccessDeniedException("You cannot view accounts of another customer");
+            }
+
+            if (Boolean.FALSE.equals(currentCustomer.getIsCustomerActive())) {
+                throw new AccessDeniedException("Your profile is inactive. Please contact admin.");
+            }
+        }
+
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        return customer.getAccounts().stream()
+                .filter(Account::getIsAccountActive) // only active accounts
+                .map(acc -> {
+                    AccountSummary dto = modelMapper.map(acc, AccountSummary.class);
+                    dto.setCustomerId(customerId);
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+
+    @Override
+    public AccountSummary getAccountById(Long accountId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new RuntimeException("Account not found"));
+
+        if (!isAdmin) {
+            Customer currentCustomer = customerRepository.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            if (!account.getCustomer().getId().equals(currentCustomer.getId())) {
+                throw new AccessDeniedException("You cannot access another customer’s account");
+            }
+
+            if (Boolean.FALSE.equals(currentCustomer.getIsCustomerActive())) {
+                throw new AccessDeniedException("Your profile is inactive. Please contact admin.");
+            }
+
+            if (Boolean.FALSE.equals(account.getIsAccountActive())) {
+                throw new AccessDeniedException("This account is inactive. Please contact admin.");
+            }
+        }
+
+        AccountSummary dto = modelMapper.map(account, AccountSummary.class);
+        dto.setCustomerId(account.getCustomer().getId());
+        return dto;
+    }
+
+
+
+    @Override
+    public List<AccountSummary> getAllAccounts() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+        if (!isAdmin) {
+            throw new AccessDeniedException("Only admins can view all accounts");
+        }
+
+        List<Account> accounts = accountRepository.findAll();
+
+        return accounts.stream()
+                .map(a -> {
+                    AccountSummary dto = new AccountSummary();
+                    dto.setAccountId(a.getAccountId());
+                    dto.setAccountNumber(a.getAccountNumber());
+                    dto.setAccountType(a.getAccountType());
+                    dto.setBalance(a.getBalance());
+                    dto.setIsAccountActive(a.getIsAccountActive());
+                    dto.setCustomerId(a.getCustomer() != null ? a.getCustomer().getId() : null);
+                    
+                    return dto;
+                })
+                .toList();
+    }
+    
+    public void deleteAccount(Long accountId) {
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new RuntimeException("Account not found"));
+
+        account.setIsAccountActive(false); // soft-delete account
+        accountRepository.save(account);
+    }
+
+
+
+}

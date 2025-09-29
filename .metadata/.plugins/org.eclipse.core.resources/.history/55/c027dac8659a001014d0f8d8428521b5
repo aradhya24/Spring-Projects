@@ -1,0 +1,113 @@
+package com.aurionpro.service;
+
+import java.io.ByteArrayOutputStream;
+import java.util.List;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.stereotype.Service;
+
+import com.aurionpro.dto.TransactionResponse;
+import com.lowagie.text.Document;
+import com.lowagie.text.DocumentException;
+import com.lowagie.text.Paragraph;
+import com.lowagie.text.pdf.PdfWriter;
+
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
+
+@Service
+public class EmailService {
+
+    private final JavaMailSender mailSender;
+
+    @Autowired
+    public EmailService(JavaMailSender mailSender) {
+        this.mailSender = mailSender;
+    }
+
+    // ----------------------- GENERIC EMAIL -----------------------
+    public void sendEmail(String to, String subject, String body) {
+        SimpleMailMessage msg = new SimpleMailMessage();
+        msg.setTo(to);
+        msg.setSubject(subject);
+        msg.setText(body);
+        mailSender.send(msg);
+    }
+
+    // ----------------------- CUSTOMER REGISTRATION -----------------------
+    public void sendCustomerRegistrationEmail(String email, Long customerId) {
+        String subject = "Customer Registration Successful";
+        String body = "Dear Customer,\n\nYour registration is successful. Your Customer ID: " + customerId + "\n\nThank you!";
+        sendEmail(email, subject, body);
+    }
+
+    // ----------------------- ACCOUNT STATUS -----------------------
+    public void sendAccountStatusEmail(String email, Long accountId, boolean isActivated) {
+        String subject = "Account " + (isActivated ? "Activated" : "Inactivated");
+        String body = "Dear Customer,\n\nYour Account ID: " + accountId + " has been " 
+                      + (isActivated ? "activated." : "inactivated.") + "\n\nThank you!";
+        sendEmail(email, subject, body);
+    }
+
+    // ----------------------- TRANSACTION ALERT -----------------------
+    public void sendTransactionAlertEmail(String email, Long accountId, String type, String remarks, String amount) {
+        String subject = "Transaction Alert";
+        String body = "Dear Customer,\n\nYour Account ID: " + accountId + " has a " + type + " transaction of amount " + amount
+                      + ". Remarks: " + remarks + "\n\nThank you!";
+        sendEmail(email, subject, body);
+    }
+
+    // ----------------------- PASSBOOK EMAIL -----------------------
+    public void sendPassbookEmail(String email, String passbookDetails, Long accountId) {
+        String subject = "Passbook Details for Account " + accountId;
+        String body = "Dear Customer,\n\n" + passbookDetails + "\n\nThank you!";
+        sendEmail(email, subject, body);
+    }
+
+    // Send passbook PDF
+    public void sendPassbookPdfEmail(String email, Long accountId, List<TransactionResponse> passbook) {
+        try {
+            // Create PDF in memory
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            Document document = new Document();
+            PdfWriter.getInstance(document, baos);
+            document.open();
+            
+            document.add(new Paragraph("Passbook Details for Account " + accountId + "\n\n"));
+
+            for (TransactionResponse txn : passbook) {
+                String line = String.format(
+                    "TransID: %d | Date: %s | Type: %s | Amount: %.2f | Balance: %.2f | To Account: %s | Remarks: %s",
+                    txn.getTransId(),
+                    txn.getDate(),
+                    txn.getTransType(),
+                    txn.getAmount(),
+                    txn.getBalanceAfterTxn(),
+                    txn.getToAccountId() != null ? txn.getToAccountId() : "-",
+                    txn.getRemarks() != null ? txn.getRemarks() : "-"
+                );
+                document.add(new Paragraph(line));
+            }
+
+            document.close();
+
+            // Send email with attachment
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true);
+            helper.setTo(email);
+            helper.setSubject("Passbook PDF for Account " + accountId);
+            helper.setText("Dear Customer,\n\nPlease find attached your passbook PDF.\n\nThank you!");
+            helper.addAttachment("Passbook_" + accountId + ".pdf", new ByteArrayResource(baos.toByteArray()));
+
+            mailSender.send(message);
+
+        } catch (DocumentException | MessagingException e) {
+            e.printStackTrace();
+            throw new RuntimeException("Failed to send PDF email: " + e.getMessage());
+        }
+    }
+}

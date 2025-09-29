@@ -1,0 +1,84 @@
+package com.aurionpro.config;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
+import org.modelmapper.Converter;
+import org.modelmapper.ModelMapper;
+import org.modelmapper.convention.MatchingStrategies;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import com.aurionpro.dto.AccountSummary;
+import com.aurionpro.dto.AddressResponse;
+import com.aurionpro.dto.CustomerResponse;
+import com.aurionpro.dto.TransactionSummary;
+import com.aurionpro.dto.UserResponse;
+import com.aurionpro.entity.Address;
+import com.aurionpro.entity.Customer;
+import com.aurionpro.entity.Transaction;
+import com.aurionpro.entity.User;
+
+@Configuration
+public class ModelMapperConfig {
+
+    @Bean
+    public ModelMapper modelMapper() {
+        ModelMapper mm = new ModelMapper();
+        mm.getConfiguration()
+          .setMatchingStrategy(MatchingStrategies.STRICT)
+          .setFieldMatchingEnabled(true)
+          .setSkipNullEnabled(true);
+
+        // --- Custom converter for Customer -> List<AccountSummary> ---
+        Converter<Customer, List<AccountSummary>> customerAccountsConverter =
+                ctx -> toAccountSummaries(ctx.getSource());
+
+        // --- Custom converter for Customer -> List<TransactionSummary> ---
+        Converter<Customer, List<TransactionSummary>> customerTransactionsConverter =
+                ctx -> toTransactionSummaries(ctx.getSource() != null ? ctx.getSource().getTransactions() : null);
+
+        // Map nested accounts & transactions to summaries
+        mm.typeMap(Customer.class, CustomerResponse.class)
+          .addMappings(m -> m.using(customerAccountsConverter).map(src -> src, CustomerResponse::setAccounts))
+          .addMappings(m -> m.using(customerTransactionsConverter).map(src -> src, CustomerResponse::setTransactions));
+        
+        mm.typeMap(Address.class, AddressResponse.class);
+        mm.typeMap(User.class, UserResponse.class);
+
+        mm.validate();
+
+        return mm;
+    }
+
+    // --- Helper: map accounts to AccountSummary with customerId ---
+    private static List<AccountSummary> toAccountSummaries(Customer customer) {
+        if (customer == null || customer.getAccounts() == null) return List.of();
+
+        return customer.getAccounts().stream()
+                .filter(Objects::nonNull)
+                .map(a -> {
+                    AccountSummary dto = new AccountSummary();
+                    dto.setAccountId(a.getAccountId());
+                    dto.setAccountNumber(a.getAccountNumber());
+                    dto.setAccountType(a.getAccountType());
+                    dto.setBalance(a.getBalance());
+                    dto.setCustomerId(customer.getId()); // set customerId here
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+    // --- Helper: map transactions to TransactionSummary ---
+    private static List<TransactionSummary> toTransactionSummaries(List<Transaction> transactions) {
+        if (transactions == null) return List.of();
+        return transactions.stream()
+                .filter(Objects::nonNull)
+                .map(t -> new TransactionSummary(
+                        t.getTransId(),
+                        t.getTransType(),
+                        t.getAmount()))
+                .collect(Collectors.toList());
+    }
+}

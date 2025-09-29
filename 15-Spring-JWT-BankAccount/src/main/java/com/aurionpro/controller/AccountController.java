@@ -1,0 +1,73 @@
+package com.aurionpro.controller;
+
+import java.util.List;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.aurionpro.dto.AccountCreateRequest;
+import com.aurionpro.dto.AccountSummary;
+import com.aurionpro.service.AccountService;
+
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+
+@RestController
+@RequestMapping("/api/accounts")
+@RequiredArgsConstructor
+public class AccountController {
+
+    private final AccountService accountService;
+
+    // ADMIN can create accounts, CUSTOMER can create their own
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN','CUSTOMER')")
+    @PostMapping
+    public ResponseEntity<AccountSummary> createAccount(@Valid @RequestBody AccountCreateRequest request) {
+        return ResponseEntity.ok(accountService.createAccount(request));
+    }
+
+    // ADMIN can fetch any customer's accounts
+    // CUSTOMER can only fetch their own (ownership check in service layer)
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN','CUSTOMER')")
+    @GetMapping("/customer/{customerId}")
+    public ResponseEntity<List<AccountSummary>> getAccountsByCustomer(@PathVariable Long customerId) {
+        return ResponseEntity.ok(accountService.getAccountsByCustomerId(customerId));
+    }
+
+    // ADMIN can fetch any account, CUSTOMER only their own
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN','CUSTOMER')")
+    @GetMapping("/{accountId}")
+    public ResponseEntity<AccountSummary> getAccountById(@PathVariable Long accountId) {
+        return ResponseEntity.ok(accountService.getAccountById(accountId));
+    }
+
+    // Only ADMIN can view all accounts
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN')")
+    @GetMapping
+    public ResponseEntity<List<AccountSummary>> getAllAccounts() {
+        List<AccountSummary> accounts = accountService.getAllAccounts();
+        return ResponseEntity.ok(accounts);
+    }
+    
+    // ADMIN can delete Account
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN')")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<String> inactivateAccount(@PathVariable Long id) {
+        return ResponseEntity.ok(accountService.inActivateAccount(id));
+    }
+    
+ // ADMIN can activate Account
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ADMIN')")
+    @PatchMapping("/{id}")
+    public ResponseEntity<String> activateCustomer(@PathVariable Long id) {
+        return ResponseEntity.ok(accountService.activateAccount(id));
+    }
+}

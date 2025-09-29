@@ -1,0 +1,15 @@
+package com.aurionpro.service;
+
+import com.aurionpro.dto.TransactionCreateRequest;
+import com.aurionpro.dto.TransactionResponse;
+
+import java.util.List;
+
+public interface TransactionService {
+
+    TransactionResponse createTransaction(TransactionCreateRequest request);
+
+    List<TransactionResponse> getTransactionsByAccountId(Long accountId);
+
+    List<TransactionResponse> getTransactionsByCustomerId(Long customerId);
+}

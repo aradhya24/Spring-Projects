@@ -1,0 +1,28 @@
+package com.aurionpro.service;
+
+import java.util.List;
+
+import com.aurionpro.dto.AccountCreateRequest;
+import com.aurionpro.dto.AccountResponse;
+import com.aurionpro.dto.CustomerRequest;
+import com.aurionpro.dto.CustomerResponse;
+
+public interface CustomerService {
+	
+	CustomerResponse createCustomer(CustomerRequest request);
+	
+    CustomerResponse updateCustomer(CustomerRequest request);
+    
+    void deleteCustomer(Long id);
+    
+    CustomerResponse getCustomerById(Long id);
+    
+    List<CustomerResponse> getAllCustomers();
+    
+    
+    
+    AccountResponse createAccount(AccountCreateRequest request);
+
+    List<AccountResponse> getAccountsByCustomerId(Long customerId);	
+
+}

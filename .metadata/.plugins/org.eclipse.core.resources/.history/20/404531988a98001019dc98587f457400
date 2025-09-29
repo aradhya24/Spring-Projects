@@ -1,0 +1,99 @@
+package com.aurionpro.config;
+
+import org.modelmapper.ModelMapper;
+import org.modelmapper.convention.MatchingStrategies;
+import org.modelmapper.Converter;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import com.aurionpro.dto.AddressRequest;
+import com.aurionpro.dto.CustomerRequest;
+import com.aurionpro.dto.AccountSummary;
+import com.aurionpro.dto.CustomerResponse;
+import com.aurionpro.dto.TransactionSummary;
+import com.aurionpro.entity.Address;
+import com.aurionpro.entity.Customer;
+import com.aurionpro.entity.Transaction;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
+@Configuration
+public class ModelMapperConfig {
+
+	@Bean
+	public ModelMapper modelMapper() {
+	    ModelMapper mm = new ModelMapper();
+
+	    mm.getConfiguration()
+	      .setMatchingStrategy(MatchingStrategies.STRICT)
+	      .setFieldMatchingEnabled(true)
+	      .setSkipNullEnabled(true);
+
+	    // --- Custom converter for Address ---
+	    Converter<AddressRequest, Address> addressConverter = ctx -> {
+	        AddressRequest src = ctx.getSource();
+	        if (src == null) return null;
+	        Address address = new Address();
+	        address.setCity(src.getCity());
+	        address.setState(src.getState());
+	        address.setPincode(src.getPincode());
+	        return address;
+	    };
+
+	    // --- Create empty TypeMap for CustomerRequest -> Customer ---
+	    TypeMap<CustomerRequest, Customer> customerMap = mm.createTypeMap(CustomerRequest.class, Customer.class);
+
+	    // --- Add explicit mapping using converter ---
+	    customerMap.addMappings(mapper -> mapper.using(addressConverter)
+	                                           .map(CustomerRequest::getAddress, Customer::setAddress));
+
+	    // --- Custom converter for Customer -> AccountSummary list ---
+	    Converter<Customer, List<AccountSummary>> customerAccountsConverter =
+	            ctx -> toAccountSummaries(ctx.getSource());
+
+	    // --- Custom converter for Customer -> TransactionSummary list ---
+	    Converter<Customer, List<TransactionSummary>> customerTransactionsConverter =
+	            ctx -> toTransactionSummaries(ctx.getSource() != null ? ctx.getSource().getTransactions() : null);
+
+	    // --- Map Customer -> CustomerResponse ---
+	    mm.typeMap(Customer.class, CustomerResponse.class)
+	      .addMappings(m -> m.using(customerAccountsConverter)
+	                          .map(src -> src, CustomerResponse::setAccounts))
+	      .addMappings(m -> m.using(customerTransactionsConverter)
+	                          .map(src -> src, CustomerResponse::setTransactions));
+
+	    return mm;
+	}
+
+
+    private static List<AccountSummary> toAccountSummaries(Customer customer) {
+        if (customer == null || customer.getAccounts() == null) return List.of();
+
+        return customer.getAccounts().stream()
+                .filter(Objects::nonNull)
+                .map(a -> {
+                    AccountSummary dto = new AccountSummary();
+                    dto.setAccountId(a.getAccountId());
+                    dto.setAccountNumber(a.getAccountNumber());
+                    dto.setAccountType(a.getAccountType());
+                    dto.setBalance(a.getBalance());
+                    dto.setCustomerId(customer.getId());
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+    private static List<TransactionSummary> toTransactionSummaries(List<Transaction> transactions) {
+        if (transactions == null) return List.of();
+
+        return transactions.stream()
+                .filter(Objects::nonNull)
+                .map(t -> new TransactionSummary(
+                        t.getTransId(),
+                        t.getTransType(),
+                        t.getAmount()))
+                .collect(Collectors.toList());
+    }
+}

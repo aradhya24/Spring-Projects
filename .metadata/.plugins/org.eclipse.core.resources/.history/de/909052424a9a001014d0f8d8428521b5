@@ -1,0 +1,221 @@
+package com.aurionpro.service;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.modelmapper.ModelMapper;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import com.aurionpro.dto.EmailRequest;
+import com.aurionpro.dto.TransactionCreateRequest;
+import com.aurionpro.dto.TransactionResponse;
+import com.aurionpro.entity.Account;
+import com.aurionpro.entity.Customer;
+import com.aurionpro.entity.Transaction;
+import com.aurionpro.repository.AccountRepo;
+import com.aurionpro.repository.CustomerRepo;
+import com.aurionpro.repository.TransactionRepo;
+
+import lombok.RequiredArgsConstructor;
+
+@Service
+@RequiredArgsConstructor
+public class TransactionServiceImpl implements TransactionService {
+
+	private final TransactionRepo transactionRepo;
+	private final CustomerRepo customerRepo;
+	private final AccountRepo accountRepo;
+	private final EmailService emailService;
+	private final ModelMapper modelMapper;
+
+	@Override
+	public TransactionResponse createTransaction(TransactionCreateRequest request) {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		String username = auth.getName();
+		boolean isAdmin = auth.getAuthorities().stream().anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+		Customer customer = customerRepo.findById(request.getCustomerId())
+				.orElseThrow(() -> new RuntimeException("Customer not found"));
+
+		// Ownership check
+		if (!isAdmin) {
+			Customer currentCustomer = customerRepo.findByUserUsername(username)
+					.orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+			if (!currentCustomer.getId().equals(customer.getId())) {
+				throw new AccessDeniedException("You cannot create a transaction for another customer");
+			}
+		}
+
+		// Handle DEBIT / CREDIT / TRANSFER
+		if ("TRANSFER".equalsIgnoreCase(request.getTransType())) {
+			return handleTransfer(request, customer);
+		} else {
+			return handleSimpleTransaction(request, customer);
+		}
+	}
+
+	private TransactionResponse handleSimpleTransaction(TransactionCreateRequest request, Customer customer) {
+		Account account = accountRepo.findById(request.getFromAccountId())
+				.orElseThrow(() -> new RuntimeException("Account not found"));
+
+		if (!account.getCustomer().getId().equals(customer.getId())) {
+			throw new AccessDeniedException("This account does not belong to the customer");
+		}
+
+		if ("DEBIT".equalsIgnoreCase(request.getTransType())) {
+			if (account.getBalance().compareTo(request.getAmount()) < 0) {
+				throw new RuntimeException("Insufficient balance");
+			}
+			account.setBalance(account.getBalance().subtract(request.getAmount()));
+		} else if ("CREDIT".equalsIgnoreCase(request.getTransType())) {
+			account.setBalance(account.getBalance().add(request.getAmount()));
+		}
+
+		Transaction transaction = Transaction.builder().account(account).customer(customer).amount(request.getAmount())
+				.transType(request.getTransType()).remarks(request.getRemarks()).date(LocalDateTime.now()).build();
+
+		Transaction saved = transactionRepo.save(transaction);
+		accountRepo.save(account);
+
+		// Email notification (✅ fixed: use customer.getEmailid)
+		// Email notification
+		emailService.sendSimpleEmail(new EmailRequest(customer.getEmailid(), "Transaction Alert", "Your account "
+				+ account.getAccountId() + " was " + request.getTransType() + " with amount " + request.getAmount()));
+
+		TransactionResponse response = modelMapper.map(saved, TransactionResponse.class);
+		response.setCustomerId(customer.getId());
+		response.setAccountId(account.getAccountId());
+		return response;
+	}
+
+	private TransactionResponse handleTransfer(TransactionCreateRequest request, Customer sender) {
+		Account fromAcc = accountRepo.findById(request.getFromAccountId())
+				.orElseThrow(() -> new RuntimeException("Sender account not found"));
+
+		Account toAcc = accountRepo.findById(request.getToAccountId())
+				.orElseThrow(() -> new RuntimeException("Receiver account not found"));
+
+		if (!fromAcc.getCustomer().getId().equals(sender.getId())) {
+			throw new AccessDeniedException("You cannot transfer from another customer's account");
+		}
+
+		if (fromAcc.getBalance().compareTo(request.getAmount()) < 0) {
+			throw new RuntimeException("Insufficient balance");
+		}
+
+		// Deduct from sender
+		fromAcc.setBalance(fromAcc.getBalance().subtract(request.getAmount()));
+		Transaction debitTx = Transaction.builder().account(fromAcc).customer(sender).amount(request.getAmount())
+				.transType("DEBIT").remarks("Transfer to Account " + toAcc.getAccountId()).date(LocalDateTime.now())
+				.build();
+
+		// Credit receiver
+		toAcc.setBalance(toAcc.getBalance().add(request.getAmount()));
+		Transaction creditTx = Transaction.builder().account(toAcc).customer(toAcc.getCustomer())
+				.amount(request.getAmount()).transType("CREDIT")
+				.remarks("Transfer from Account " + fromAcc.getAccountId()).date(LocalDateTime.now()).build();
+
+		transactionRepo.save(debitTx);
+		transactionRepo.save(creditTx);
+		accountRepo.save(fromAcc);
+		accountRepo.save(toAcc);
+
+		// Send emails (✅ both fixed)
+		emailService.sendSimpleEmail(new EmailRequest(sender.getEmailid(), "Debit Alert",
+				"You transferred " + request.getAmount() + " to account " + toAcc.getAccountId()));
+
+		emailService.sendSimpleEmail(new EmailRequest(toAcc.getCustomer().getEmailid(), "Credit Alert",
+				"You received " + request.getAmount() + " from account " + fromAcc.getAccountId()));
+
+		TransactionResponse response = modelMapper.map(debitTx, TransactionResponse.class);
+		response.setCustomerId(sender.getId());
+		response.setAccountId(fromAcc.getAccountId());
+		return response;
+	}
+
+	@Override
+	public List<TransactionResponse> getTransactionsByAccountId(Long accountId) {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		String username = auth.getName();
+		boolean isAdmin = auth.getAuthorities().stream().anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+		Account account = accountRepo.findById(accountId).orElseThrow(() -> new RuntimeException("Account not found"));
+
+		if (!isAdmin) {
+			Customer currentCustomer = customerRepo.findByUserUsername(username)
+					.orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+			if (!account.getCustomer().getId().equals(currentCustomer.getId())) {
+				throw new AccessDeniedException("You cannot view transactions of another customer’s account");
+			}
+		}
+
+		return account.getTransactions().stream().map(t -> {
+			TransactionResponse dto = modelMapper.map(t, TransactionResponse.class);
+			dto.setCustomerId(account.getCustomer().getId());
+			dto.setAccountId(accountId);
+			return dto;
+		}).collect(Collectors.toList());
+	}
+
+	@Override
+	public List<TransactionResponse> getTransactionsByCustomerId(Long customerId) {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		String username = auth.getName();
+		boolean isAdmin = auth.getAuthorities().stream().anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+		if (!isAdmin) {
+			Customer currentCustomer = customerRepo.findByUserUsername(username)
+					.orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+			if (!currentCustomer.getId().equals(customerId)) {
+				throw new AccessDeniedException("You cannot view transactions of another customer");
+			}
+		}
+
+		Customer customer = customerRepo.findById(customerId)
+				.orElseThrow(() -> new RuntimeException("Customer not found"));
+
+		return customer.getTransactions().stream().map(t -> {
+			TransactionResponse dto = modelMapper.map(t, TransactionResponse.class);
+			dto.setCustomerId(customerId);
+			dto.setAccountId(t.getAccount().getAccountId());
+			return dto;
+		}).collect(Collectors.toList());
+	}
+	
+	
+	public List<TransactionResponse> getPassbook(Long accountId) {
+	    Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+	    String username = auth.getName();
+	    boolean isAdmin = auth.getAuthorities().stream()
+	            .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+	    Account account = accountRepo.findById(accountId)
+	            .orElseThrow(() -> new RuntimeException("Account not found"));
+
+	    if (!isAdmin) {
+	        Customer currentCustomer = customerRepo.findByUserUsername(username)
+	                .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+	        if (!account.getCustomer().getId().equals(currentCustomer.getId())) {
+	            throw new AccessDeniedException("You cannot view another customer's passbook");
+	        }
+	    }
+
+	    return account.getTransactions().stream()
+	            .sorted((t1, t2) -> t1.getDate().compareTo(t2.getDate())) // sort by date ascending
+	            .map(t -> {
+	                TransactionResponse dto = modelMapper.map(t, TransactionResponse.class);
+	                dto.setCustomerId(account.getCustomer().getId());
+	                dto.setAccountId(accountId);
+	                return dto;
+	            })
+	            .collect(Collectors.toList());
+	}
+
+}

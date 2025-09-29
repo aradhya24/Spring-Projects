@@ -1,0 +1,191 @@
+package com.aurionpro.service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.modelmapper.ModelMapper;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import com.aurionpro.dto.AccountCreateRequest;
+import com.aurionpro.dto.AccountResponse;
+import com.aurionpro.dto.CustomerRequest;
+import com.aurionpro.dto.CustomerResponse;
+import com.aurionpro.repository.AccountRepo;
+import com.aurionpro.repository.CustomerRepo;
+import com.aurionpro.entity.Account;
+import com.aurionpro.entity.Address;
+import com.aurionpro.entity.Customer;
+
+import lombok.RequiredArgsConstructor;
+
+@Service
+@RequiredArgsConstructor
+public class CustomerServiceImpl implements CustomerService {
+
+    private final CustomerRepo customerRepository;
+    private final AccountRepo accountRepository;
+    private final ModelMapper modelMapper;
+
+    // ---------------- Customer CRUD ----------------
+    @Override
+    public CustomerResponse createCustomer(CustomerRequest request) {
+        Customer customer = modelMapper.map(request, Customer.class);
+        return modelMapper.map(customerRepository.save(customer), CustomerResponse.class);
+    }
+
+    @Override
+    public CustomerResponse updateCustomer(Long id, CustomerRequest request) {
+        Customer existing = customerRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        // Update only if request field is not null
+        if (request.getFirstName() != null) {
+            existing.setFirstName(request.getFirstName());
+        }
+        if (request.getLastName() != null) {
+            existing.setLastName(request.getLastName());
+        }
+        if (request.getEmailid() != null) {
+            existing.setEmailid(request.getEmailid());
+        }
+        if (request.getContactno() != null) {
+            existing.setContactno(request.getContactno());
+        }
+        if (request.getDob() != null) {
+            existing.setDob(request.getDob());
+        }
+        if (request.getIsCustomerActive() != null) {
+            existing.setIsCustomerActive(request.getIsCustomerActive());
+        }
+        
+
+        // Handle nested Address update
+        if (request.getAddress() != null) {
+            Address addr = existing.getAddress();
+            if (addr == null) {
+                addr = new Address();
+                existing.setAddress(addr);
+            }
+            if (request.getAddress().getCity() != null) {
+                addr.setCity(request.getAddress().getCity());
+            }
+            if (request.getAddress().getState() != null) {
+                addr.setState(request.getAddress().getState());
+            }
+            if (request.getAddress().getPincode() != null) {
+                addr.setPincode(request.getAddress().getPincode());
+            }
+        }
+
+        Customer updated = customerRepository.save(existing);
+        return modelMapper.map(updated, CustomerResponse.class);
+    }
+
+
+    @Override
+    public void deleteCustomer(Long id) {
+        if (!customerRepository.existsById(id)) {
+            throw new RuntimeException("Customer not found");
+        }
+        customerRepository.deleteById(id);
+    }
+
+    @Override
+    public CustomerResponse getCustomerById(Long id) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+
+        boolean isAdmin = auth.getAuthorities().stream()
+            .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+        if (!isAdmin) {
+            // Fetch logged-in customer by username
+            Customer currentCustomer = customerRepository.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            // Prevent customer from accessing others’ data
+            if (!currentCustomer.getId().equals(id)) {
+                throw new AccessDeniedException("You cannot access another customer's details");
+            }
+        }
+
+        Customer customer = customerRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        return modelMapper.map(customer, CustomerResponse.class);
+    }
+
+
+    @Override
+    public List<CustomerResponse> getAllCustomers() {
+        return customerRepository.findAll()
+                .stream()
+                .map(c -> modelMapper.map(c, CustomerResponse.class))
+                .collect(Collectors.toList());
+    }
+
+    // ---------------- Account Methods ----------------
+    @Override
+    public AccountResponse createAccount(AccountCreateRequest request) {
+        Customer customer = customerRepository.findById(request.getCustomerId())
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        Account account = Account.builder()
+                .accountNumber(request.getAccountNumber())
+                .accountType(request.getAccountType())
+                .balance(request.getBalance())
+                .isAccountActive(request.getIsAccountActive())
+                .build();
+
+        // Associate account with customer
+        customer.getAccounts().add(account);
+        account.setCustomer(customer);
+        accountRepository.save(account);
+
+        // Map to response
+        return AccountResponse.builder()
+                .customerId(customer.getId())
+                .accountId(account.getAccountId())
+                .accountNumber(account.getAccountNumber())
+                .accountType(account.getAccountType())
+                .balance(account.getBalance())
+                .isAccountActive(request.getIsAccountActive())
+                .transactions(List.of()) // empty list initially
+                .build();
+    }
+
+    @Override
+    public List<AccountResponse> getAccountsByCustomerId(Long customerId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(role -> role.getAuthority().equals("ROLE_ADMIN"));
+
+        if (!isAdmin) {
+            // Logged-in customer
+            Customer currentCustomer = customerRepository.findByUserUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Logged-in customer not found"));
+
+            if (!currentCustomer.getId().equals(customerId)) {
+                throw new AccessDeniedException("You cannot access another customer's accounts");
+            }
+        }
+
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        return customer.getAccounts().stream()
+                .map(a -> {
+                    AccountResponse dto = modelMapper.map(a, AccountResponse.class);
+                    dto.setCustomerId(customerId);
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+}
+

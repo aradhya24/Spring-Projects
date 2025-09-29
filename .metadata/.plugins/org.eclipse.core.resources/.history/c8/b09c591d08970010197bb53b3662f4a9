@@ -1,0 +1,42 @@
+@RestController
+@RequestMapping("/api")
+public class LoginController {
+
+    @Autowired
+    private AuthService authService;
+
+    // ✅ Register (needs ADMIN or SUPERADMIN token)
+    @PostMapping("/register")
+    @PreAuthorize("hasAnyRole('ADMIN','SUPERADMIN')")
+    public ResponseEntity<UserResponseDto> register(@RequestBody RegistrationDto registerDto) {
+
+        String role = registerDto.getRole().toUpperCase();
+
+        if ("ADMIN".equals(role) && !hasRole("SUPERADMIN")) {
+            throw new RuntimeException("Only SUPERADMIN can register an ADMIN user");
+        }
+
+        if ("CUSTOMER".equals(role) && !(hasRole("ADMIN") || hasRole("SUPERADMIN"))) {
+            throw new RuntimeException("Only ADMIN or SUPERADMIN can register a CUSTOMER");
+        }
+
+        // service will add "ROLE_" prefix before saving
+        return ResponseEntity.ok(authService.register(registerDto));
+    }
+
+    // ✅ Login is public
+    @PostMapping("/login")
+    public ResponseEntity<JwtAuthResponse> login(@RequestBody LoginDto loginDto) {
+        String token = authService.login(loginDto);
+        return ResponseEntity.ok(new JwtAuthResponse(token));
+    }
+
+    private boolean hasRole(String role) {
+        return org.springframework.security.core.context.SecurityContextHolder
+                .getContext()
+                .getAuthentication()
+                .getAuthorities()
+                .stream()
+                .anyMatch(granted -> granted.getAuthority().equals("ROLE_" + role));
+    }
+}

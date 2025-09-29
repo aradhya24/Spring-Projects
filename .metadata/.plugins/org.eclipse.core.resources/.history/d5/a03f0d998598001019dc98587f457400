@@ -1,0 +1,12 @@
+package com.aurionpro.service;
+
+import com.aurionpro.dto.LoginDto;
+import com.aurionpro.dto.RegistrationDto;
+import com.aurionpro.dto.UserResponseDto;
+
+public interface AuthService {
+	
+	UserResponse register(RegistrationDto registration);
+    String login(LoginDto loginDto);
+
+}

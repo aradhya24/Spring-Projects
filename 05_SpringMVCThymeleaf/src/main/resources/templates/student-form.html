@@ -1,0 +1,45 @@
+<!DOCTYPE HTML>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+	
+	<link rel="stylesheet" href="css/style.css">
+	
+</head>	
+<body>
+	
+	<form th:action="@{/processForm}" th:object="${student}" method="post">
+		<label for="firstName">Enter First name</label> 
+		<input type="text" id="firstName" th:field ="*{firstName}" name="name"/><br>
+		<label for="lastName">Enter Last name</label> 
+		<input type="text" id="lastName" th:field ="*{lastName}" name="name"/><br>
+		
+		<select th:field="*{country}" name="country">
+		<!--	<option th:value="Brazil">Brazil</option>
+			<option th:value="India">India</option>
+			<option th:value="Japan">Japan</option>
+			<option th:value="USA">USA</option>-->
+			
+			<option th:each="tempCountry : ${countries}" th:value="${tempCountry}" th:text="${tempCountry}" />
+		</select>
+		
+		<br>
+		<p>Favorite Language:</p>
+
+		<label th:each="tempLanguage : ${languages}">
+		    <input type="radio" th:field="*{favoriteLanguage}" th:value="${tempLanguage}">
+		    <span th:text="${tempLanguage}"></span>
+		</label>
+		
+		<br><br>
+		
+		<input type="checkbox" name="oslist" "*{operatingSystem}" th:value="Linux">Linux</input>
+		<input type="checkbox" name="oslist" th:field="*{operatingSystem}" th:value="Windows">Windows</input>
+		<input type="checkbox" name="oslist" th:field="*{operatingSystem}" th:value="MacOs">MacOs</input>
+		
+
+		<input type="submit"/>	
+	</form>
+</body>
+
+
+</html>

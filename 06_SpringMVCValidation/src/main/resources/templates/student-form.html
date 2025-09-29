@@ -1,0 +1,35 @@
+<!DOCTYPE HTML>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+	
+	<link rel="stylesheet" href="css/style.css">
+	
+</head>	
+<body>
+	
+	<form th:action="@{/processForm}" th:object="${student}" method="post">
+
+	    <!-- First Name -->
+	    <label for="firstName">Enter First name (*)</label>
+	    <input type="text" id="firstName" th:field="*{firstName}" />
+	    <span th:if="${#fields.hasErrors('firstName')}"
+	          th:errors="*{firstName}"
+	          class="error"></span>
+	    <br><br>
+
+	    <!-- Last Name -->
+	    <label for="lastName">Enter Last name (*)</label>
+	    <input type="text" id="lastName" th:field="*{lastName}" />
+	    <span th:if="${#fields.hasErrors('lastName')}"
+	          th:errors="*{lastName}"
+	          class="error"></span>
+	    <br><br>
+
+	    <input type="submit" value="Submit"/>
+
+	</form>
+
+</body>
+
+
+</html>
